@@ -22,6 +22,7 @@ let auth, db;
 let unsubGames = null, unsubTeams = null, unsubPalette = null, unsubOperators = null;
 const RETRY_MIN_MS = 3000, RETRY_MAX_MS = 60000;
 let reattachTimer = null, retryDelay = RETRY_MIN_MS;
+const APP_VERSION = ((document.currentScript && document.currentScript.src.match(/[?&]v=(\d+)/)) || [])[1] || 'dev';
 
 function esc(s){
   if(s===undefined||s===null) return "";
@@ -236,24 +237,63 @@ function keepLive(){
 // Rebuilding a table under the user's hands would eat a click or the text being typed, so a
 // rebuild waits while a text field in it has focus or a press that started in it is still down,
 // and runs as soon as that ends. (Clicked buttons keep focus but no longer block updates.)
-let pressTarget = null;
-function isBusyIn(container){
+let pressTarget = null, pressAt = 0;
+const PRESS_MAX_MS = 1500; // a click never takes longer; covers presses whose release we never hear about
+
+// A field the user is in: focused text field, unless this window is in the background and the
+// field holds nothing unsaved (then nobody is typing here and it may be refreshed).
+function activeField(container){
   const ae = document.activeElement;
-  const typing = !!ae && container.contains(ae) && ae.matches('textarea, input');
-  const pressing = !!pressTarget && container.contains(pressTarget);
-  return typing || pressing;
+  if(!ae || !container.contains(ae) || !ae.matches('textarea, input')) return null;
+  return (document.hasFocus() || ae.dataset.dirty === '1') ? ae : null;
+}
+function activePress(container){
+  return pressTarget && container.contains(pressTarget) && Date.now() - pressAt < PRESS_MAX_MS ? pressTarget : null;
+}
+function isBusyIn(container){ return !!(activeField(container) || activePress(container)); }
+// The table cells to leave untouched in a rebuild: only the one being typed in / pressed.
+function heldCells(container){
+  return [activeField(container), activePress(container)].map(el=>el && el.closest('td')).filter(Boolean);
 }
 function flushPendingRenders(){
   if(state.gamesRenderPending) renderGames();
   if(state.teamsRenderPending) renderTeamColors();
 }
 function wireRenderCatchUp(){
-  document.addEventListener('pointerdown', e=>{ pressTarget = e.target; }, true);
+  document.addEventListener('pointerdown', e=>{
+    pressTarget = e.target; pressAt = Date.now();
+    setTimeout(flushPendingRenders, PRESS_MAX_MS + 100);
+  }, true);
   const release = ()=>{ pressTarget = null; setTimeout(flushPendingRenders, 120); }; // after the click (phones fire it a bit later)
   document.addEventListener('pointerup', release, true);
   document.addEventListener('pointercancel', release, true);
+  window.addEventListener('blur', release);
+  window.addEventListener('blur', ()=>setTimeout(flushPendingRenders, 60)); // window in the background: refresh clean fields too
   ['gamesBody', 'teamsByContinent'].forEach(id=>
     document.getElementById(id).addEventListener('focusout', ()=>setTimeout(flushPendingRenders, 60)));
+}
+
+// Rebuild the games table but keep the held cells (and their focus, caret and unsaved text)
+// exactly as they are: every other row, and every other cell of their rows, is refreshed.
+function patchTableKeeping(tbody, html, held){
+  const fresh = document.createElement('tbody');
+  fresh.innerHTML = html;
+  const heldRows = [...new Set(held.map(td=>td.closest('tr')))];
+  [...tbody.children].forEach(tr=>{ if(!heldRows.includes(tr)) tr.remove(); });
+  let cursor = tbody.firstChild;
+  [...fresh.children].forEach(nr=>{
+    const keep = nr.dataset.id && heldRows.find(r=>r.dataset.id === nr.dataset.id);
+    if(!keep){ tbody.insertBefore(nr, cursor); wireGameRowEvents(nr); return; }
+    [...keep.attributes].forEach(a=>{ if(!nr.hasAttribute(a.name)) keep.removeAttribute(a.name); });
+    [...nr.attributes].forEach(a=>keep.setAttribute(a.name, a.value));
+    const newCells = [...nr.children];
+    [...keep.children].forEach((td, i)=>{
+      if(held.includes(td) || !newCells[i]) return;
+      td.replaceWith(newCells[i]);
+      wireGameRowEvents(newCells[i]);
+    });
+    cursor = keep.nextSibling;
+  });
 }
 
 /* ---------------- init ---------------- */
@@ -562,11 +602,6 @@ function restyleStatusWidget(widget, status){
 
 function renderGames(){
   const tbody = document.getElementById('gamesBody');
-  // Firestore's realtime listener re-fires on every write, including our own, and a full
-  // rebuild right then would yank away the note being typed or the button being pressed.
-  // Wait until that ends (see isBusyIn / flushPendingRenders), then catch up.
-  if(isBusyIn(tbody)){ state.gamesRenderPending = true; return; }
-  state.gamesRenderPending = false;
   const banner = document.getElementById('emptyWindowBanner');
   const tableWrap = document.getElementById('gamesTableWrap');
   const list = filteredGames();
@@ -671,21 +706,30 @@ function renderGames(){
       </td>
     </tr>`;
   });
-  tbody.innerHTML = html;
-  wireGameRowEvents(tbody);
+  // Firestore's realtime listener re-fires on every write, including our own, and a full
+  // rebuild would yank away the note being typed or the button being pressed. So only that
+  // one cell waits (everything else updates now); it catches up once the user leaves it.
+  const held = heldCells(tbody);
+  state.gamesRenderPending = held.length > 0;
+  if(held.length) patchTableKeeping(tbody, html, held);
+  else { tbody.innerHTML = html; wireGameRowEvents(tbody); }
 }
 
 function autosize(ta){ ta.style.height = 'auto'; ta.style.height = (ta.scrollHeight)+'px'; }
 
 function wireGameRowEvents(tbody){
+  // dataset.dirty = typed but not saved yet. Saving only then means a box that merely had focus
+  // never writes back an old value over a change made on another device meanwhile.
   tbody.querySelectorAll('textarea.remarks-note').forEach(inp=>{
     let timer;
+    const save = ()=>{ clearTimeout(timer); inp.dataset.dirty = '0'; writeGameField(inp.closest('tr').dataset.id, 'remarks', inp.value); };
     inp.addEventListener('input', ()=>{
+      inp.dataset.dirty = '1';
       clearTimeout(timer);
-      timer = setTimeout(()=>{ writeGameField(inp.closest('tr').dataset.id, 'remarks', inp.value); }, 700);
+      timer = setTimeout(save, 700);
     });
     inp.addEventListener('blur', ()=>{
-      writeGameField(inp.closest('tr').dataset.id, 'remarks', inp.value);
+      if(inp.dataset.dirty === '1') save();
       setTimeout(renderGames, 50); // catch up on anything missed while this field had focus
     });
   });
@@ -704,6 +748,7 @@ function wireStatusWidgets(tbody){
 
     const currentStatus = () => widget.dataset.ok === 'true' ? 'ok' : (ta.value.trim() ? 'issue' : 'pending');
     const persist = (status) => {
+      clearTimeout(timer); ta.dataset.dirty = '0';
       const g = state.games.find(x=>x.id===id);
       if(g) g[field] = { status, note: ta.value };
       renderKpiStrip();
@@ -713,12 +758,13 @@ function wireStatusWidgets(tbody){
 
     let timer;
     ta.addEventListener('input', ()=>{
+      ta.dataset.dirty = '1';
       const status = currentStatus();
       if(status !== lastStatus){ restyleStatusWidget(widget, status); lastStatus = status; }
       clearTimeout(timer);
       timer = setTimeout(()=> persist(currentStatus()), 700);
     });
-    ta.addEventListener('blur', ()=>{ persist(currentStatus()); setTimeout(renderGames, 50); });
+    ta.addEventListener('blur', ()=>{ if(ta.dataset.dirty === '1') persist(currentStatus()); setTimeout(renderGames, 50); });
     okBtn.addEventListener('click', ()=>{
       const turningOn = widget.dataset.ok !== 'true';
       widget.dataset.ok = turningOn ? 'true' : 'false';
@@ -1185,7 +1231,7 @@ function renderFooter(){
     <span class="inline-flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-slate-500"></span><span class="text-slate-300">${pending} pending</span></span>
   `;
   const conn = document.getElementById('footerConn');
-  conn.textContent = state.lastSync ? `Synced ${state.lastSync.toLocaleTimeString('en-GB')}` : 'Not connected';
+  conn.textContent = (state.lastSync ? `Synced ${state.lastSync.toLocaleTimeString('en-GB')}` : 'Not connected') + ` · v${APP_VERSION.slice(-4)}`;
 }
 
 /* ---------------- one-time seed import ---------------- */
