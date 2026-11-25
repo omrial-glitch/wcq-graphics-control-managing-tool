@@ -20,6 +20,8 @@ const state = {
 
 let auth, db;
 let unsubGames = null, unsubTeams = null, unsubPalette = null, unsubOperators = null;
+const RETRY_MIN_MS = 3000, RETRY_MAX_MS = 60000;
+let reattachTimer = null, retryDelay = RETRY_MIN_MS;
 
 function esc(s){
   if(s===undefined||s===null) return "";
@@ -94,27 +96,49 @@ function showToast(msg, kind){
 }
 
 function detachListeners(){
+  if(reattachTimer){ clearTimeout(reattachTimer); reattachTimer = null; }
   if(unsubGames){ unsubGames(); unsubGames = null; }
   if(unsubTeams){ unsubTeams(); unsubTeams = null; }
   if(unsubPalette){ unsubPalette(); unsubPalette = null; }
   if(unsubOperators){ unsubOperators(); unsubOperators = null; }
 }
 
-function attachListeners(windowId){
-  detachListeners();
-  state.games = []; state.teams = {}; state.palette = [];
-  setLiveBadge('connecting');
-  setConnNote('');
-  renderAll();
+// A listener that fails (e.g. the sign-in token could not be refreshed while the device slept)
+// is dropped by Firestore for good, so try again on our own, backing off up to a minute.
+function scheduleReattach(){
+  if(reattachTimer || !state.isAdmin) return;
+  reattachTimer = setTimeout(()=>{
+    reattachTimer = null;
+    if(state.isAdmin) attachListeners(state.windowId, { keepData: true });
+  }, retryDelay);
+  retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS);
+}
 
-  unsubGames = db.collection(`windows/${windowId}/games`).onSnapshot(snap=>{
+function attachListeners(windowId, opts){
+  const keepData = !!(opts && opts.keepData); // re-attaching after an error: keep showing what we have
+  detachListeners();
+  if(!keepData){
+    state.games = []; state.teams = {}; state.palette = []; state.gamesLoaded = false;
+    setLiveBadge('connecting');
+    setConnNote('');
+    renderAll();
+  }
+
+  // includeMetadataChanges: also hear about the connection itself, so the badge shows when the
+  // data might be stale (served from cache while reconnecting) and turns LIVE again once synced.
+  unsubGames = db.collection(`windows/${windowId}/games`).onSnapshot({ includeMetadataChanges: true }, snap=>{
+    const synced = !snap.metadata.fromCache;
+    setLiveBadge(synced ? 'live' : 'connecting');
+    if(synced){ setConnNote(''); state.lastSync = new Date(); retryDelay = RETRY_MIN_MS; }
+    if(state.gamesLoaded && !snap.docChanges().length){ renderFooter(); return; } // only the connection changed
+    state.gamesLoaded = true;
     state.games = snap.docs.map(d=>Object.assign({ id: d.id }, d.data()));
-    setLiveBadge('live'); setConnNote(''); state.lastSync = new Date();
     renderAll();
   }, err=>{
     console.error(err);
-    setConnNote('Could not read the schedule: ' + err.message);
+    setConnNote('Could not read the schedule: ' + err.message + ' (retrying…)');
     setLiveBadge('offline');
+    scheduleReattach();
   });
 
   unsubTeams = db.collection(`windows/${windowId}/teams`).onSnapshot(snap=>{
@@ -122,12 +146,12 @@ function attachListeners(windowId){
     snap.docs.forEach(d=>{ t[d.id] = Object.assign({ code: d.id }, d.data()); });
     state.teams = t;
     renderAll();
-  }, err=>console.error(err));
+  }, err=>{ console.error(err); scheduleReattach(); });
 
   unsubPalette = db.collection('palette').onSnapshot(snap=>{
     state.palette = snap.docs.map(d=>d.data().hex);
     renderAll();
-  }, err=>console.error(err));
+  }, err=>{ console.error(err); scheduleReattach(); });
 
   state.operators = null; state.operatorsMeta = null; state.operatorsError = ''; state.operatorsWarnings = [];
   unsubOperators = db.doc(contactsPath(windowId)).onSnapshot(doc=>{
@@ -172,6 +196,64 @@ function startClock(){
   tick();
   setInterval(tick, 1000);
   setInterval(refreshDue, 60000);
+}
+
+/* ---------------- staying live ---------------- */
+
+// A phone in the background or a computer that slept can lose the realtime connection without
+// Firestore noticing for a long time, so updates from the other device stop arriving. When the
+// page comes back (visible again, back online, restored, or after a sleep), force a reconnect:
+// every listener then re-syncs with the server and shows what changed meanwhile.
+let resyncBusy = false;
+function resyncFirestore(){
+  if(!db || !state.isAdmin || resyncBusy) return;
+  resyncBusy = true;
+  setLiveBadge('connecting');
+  db.disableNetwork()
+    .then(()=>db.enableNetwork())
+    .catch(e=>console.error(e))
+    .finally(()=>{ resyncBusy = false; });
+}
+
+function keepLive(){
+  let hiddenAt = 0, lastBeat = Date.now();
+  document.addEventListener('visibilitychange', ()=>{
+    lastBeat = Date.now();
+    if(document.hidden){ hiddenAt = Date.now(); return; }
+    if(hiddenAt && Date.now() - hiddenAt > 15000) resyncFirestore();
+    hiddenAt = 0;
+  });
+  window.addEventListener('online', resyncFirestore);
+  window.addEventListener('pageshow', e=>{ if(e.persisted) resyncFirestore(); });
+  // This timer runs every 5 s; a long gap while the page is visible means the computer slept.
+  setInterval(()=>{
+    const now = Date.now();
+    if(!document.hidden && now - lastBeat > 30000) resyncFirestore();
+    lastBeat = now;
+  }, 5000);
+}
+
+// Rebuilding a table under the user's hands would eat a click or the text being typed, so a
+// rebuild waits while a text field in it has focus or a press that started in it is still down,
+// and runs as soon as that ends. (Clicked buttons keep focus but no longer block updates.)
+let pressTarget = null;
+function isBusyIn(container){
+  const ae = document.activeElement;
+  const typing = !!ae && container.contains(ae) && ae.matches('textarea, input');
+  const pressing = !!pressTarget && container.contains(pressTarget);
+  return typing || pressing;
+}
+function flushPendingRenders(){
+  if(state.gamesRenderPending) renderGames();
+  if(state.teamsRenderPending) renderTeamColors();
+}
+function wireRenderCatchUp(){
+  document.addEventListener('pointerdown', e=>{ pressTarget = e.target; }, true);
+  const release = ()=>{ pressTarget = null; setTimeout(flushPendingRenders, 120); }; // after the click (phones fire it a bit later)
+  document.addEventListener('pointerup', release, true);
+  document.addEventListener('pointercancel', release, true);
+  ['gamesBody', 'teamsByContinent'].forEach(id=>
+    document.getElementById(id).addEventListener('focusout', ()=>setTimeout(flushPendingRenders, 60)));
 }
 
 /* ---------------- init ---------------- */
@@ -270,6 +352,8 @@ function init(){
   });
 
   wireSettingsModal();
+  wireRenderCatchUp();
+  keepLive();
   startClock();
   // If Firebase never answers (offline, blocked), fall back to the sign-in card instead of a blank page.
   setTimeout(()=>{
@@ -478,12 +562,11 @@ function restyleStatusWidget(widget, status){
 
 function renderGames(){
   const tbody = document.getElementById('gamesBody');
-  // Firestore's realtime listener re-fires on every write, including our
-  // own (both the instant local echo and the server-confirmed one) -- a
-  // full table rebuild right then would yank focus out from under
-  // whatever the user is typing. Skip the rebuild while a cell in this
-  // table is focused; it'll catch up the moment they click away.
-  if(tbody.contains(document.activeElement)) return;
+  // Firestore's realtime listener re-fires on every write, including our own, and a full
+  // rebuild right then would yank away the note being typed or the button being pressed.
+  // Wait until that ends (see isBusyIn / flushPendingRenders), then catch up.
+  if(isBusyIn(tbody)){ state.gamesRenderPending = true; return; }
+  state.gamesRenderPending = false;
   const banner = document.getElementById('emptyWindowBanner');
   const tableWrap = document.getElementById('gamesTableWrap');
   const list = filteredGames();
@@ -728,8 +811,8 @@ function gameMatchesTeamSearch(g){
 
 function renderTeamColors(){
   const wrap = document.getElementById('teamsByContinent');
-  const active = document.activeElement;
-  if(active && active.matches('input[data-team]') && wrap.contains(active)) return; // don't yank focus while typing a hex code
+  if(isBusyIn(wrap)){ state.teamsRenderPending = true; return; } // don't yank focus while typing a hex code
+  state.teamsRenderPending = false;
   const teams = state.teams;
   // While searching, look across all confederations (by team code or full name).
   document.getElementById('colorContinentTabs').classList.toggle('hidden', !!state.search);
