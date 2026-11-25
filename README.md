@@ -4,15 +4,15 @@ Admin dashboard for tracking TV graphics production on FIBA World Cup Qualifier 
 
 - **`index.html`** — internal admin dashboard (game schedule, BOVM/GFX crew, backup clock & GFX example status, team colours editor). Requires signing in with the admin account to read or write the schedule.
 
-Data lives in **Firebase (Firestore)**, read and written directly from the browser via the Firebase SDK. GitHub Pages only hosts the static HTML/CSS/JS; `firebase-config.js` holds the project's public web config (not a secret — Firebase security comes from the Firestore rules below and from sign-in, not from hiding this file). It holds no personal details; the admin's email lives only in the Firestore rules.
+Data lives in **Firebase (Firestore)**, read and written directly from the browser via the Firebase SDK. GitHub Pages only hosts the static HTML/CSS/JS; `firebase-config.js` holds the project's public web config (not a secret — Firebase security comes from the Firestore rules below and from sign-in, not from hiding this file). It holds no personal details.
 
 ## How access is controlled
 
 Firestore rules (set in the Firebase console under Firestore Database → Rules) enforce:
-- `windows/{id}/games/**` (the full schedule — BOVM, GFX crew, statuses, notes): **admin only**, both read and write.
+- `windows/{id}/games/**` (the full schedule — BOVM, GFX crew, statuses, notes — and the GFX operator contacts under `games/_meta/contacts`): **admin only**, both read and write.
 - `windows/{id}/teams/**`, `windows/{id}/publicPairings/**`, `palette/**`: anyone can **read** (this is what `colors.html` shows), only the **admin** can write.
 
-"Admin" means signed in with Firebase Authentication (Email/Password) as the one admin account created for this project — checked by email in the rules. Sign in from `index.html` via the gear icon.
+"Admin" means signed in with Firebase Authentication (Email/Password) as the one admin account created for this project — checked by its account UID in the rules. New sign-ups are disabled in Firebase Authentication, so no other account can be created from the site. Sign in from `index.html` via the gear icon.
 
 ## Where the data comes from
 

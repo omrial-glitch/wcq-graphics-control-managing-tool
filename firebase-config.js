@@ -8,4 +8,5 @@ const FIREBASE_CONFIG = {
   measurementId: "G-Q7JSQ0S0B3"
 };
 // The admin is whoever signs in: accounts exist only for the admin, and the Firestore rules
-// (set in the Firebase console) check the admin's email on the server. No email in this public file.
+// (set in the Firebase console) check the admin's account UID on the server; new sign-ups are disabled.
+// No email in this public file.
