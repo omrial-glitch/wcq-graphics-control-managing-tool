@@ -10,7 +10,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
-<script src="firebase-config.js?v=202611251216"></script>
+<script src="firebase-config.js?v=202611251235"></script>
 <script>
   tailwind.config = {
     darkMode: 'class',
@@ -26,6 +26,12 @@
   }
 </script>
 <style>
+  /* Until someone is signed in, show nothing but the sign-in card: no header, tabs, table or footer.
+     auth-pending = Firebase hasn't said yet whether a saved session exists (shows nothing at all). */
+  body.auth-pending > :not(script){ display:none !important; }
+  body.signed-out > :not(#settingsBackdrop):not(#toastStack):not(script){ display:none !important; }
+  body.signed-out #settingsBackdrop{ background:#0b0f19; display:flex !important; }
+  body.signed-out #settingsCancel{ display:none; }
   ::-webkit-scrollbar{width:6px;height:6px}
   ::-webkit-scrollbar-track{background:#0b0f19}
   ::-webkit-scrollbar-thumb{background:#273549;border-radius:3px}
@@ -54,7 +60,7 @@
   .stripe-code{ font-size:14px; letter-spacing:.02em; text-transform:uppercase; line-height:1; white-space:nowrap; }
 </style>
 </head>
-<body class="min-h-screen bg-[#0b0f19] text-slate-100 flex flex-col font-sans antialiased selection:bg-blue-600 selection:text-white">
+<body class="auth-pending min-h-screen bg-[#0b0f19] text-slate-100 flex flex-col font-sans antialiased selection:bg-blue-600 selection:text-white">
 
 <!-- HEADER -->
 <header class="border-b border-[#1f2937] bg-[#111827]/90 backdrop-blur sticky top-0 z-30 px-4 py-2.5">
@@ -289,8 +295,8 @@
 <div id="toastStack" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 items-end"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
-<script src="seed-data.js?v=202611251216"></script>
-<script src="operators.js?v=202611251216"></script>
-<script src="admin.js?v=202611251216"></script>
+<script src="seed-data.js?v=202611251235"></script>
+<script src="operators.js?v=202611251235"></script>
+<script src="admin.js?v=202611251235"></script>
 </body>
 </html>

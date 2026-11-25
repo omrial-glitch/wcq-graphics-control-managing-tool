@@ -271,9 +271,17 @@ function init(){
 
   wireSettingsModal();
   startClock();
+  // If Firebase never answers (offline, blocked), fall back to the sign-in card instead of a blank page.
+  setTimeout(()=>{
+    if(!document.body.classList.contains('auth-pending')) return;
+    document.body.classList.remove('auth-pending');
+    document.body.classList.add('signed-out');
+  }, 8000);
 
   auth.onAuthStateChanged(user=>{
     state.isAdmin = !!user; // Firestore rules decide what this account may read or write
+    document.body.classList.remove('auth-pending');
+    document.body.classList.toggle('signed-out', !state.isAdmin);
     updateAuthUI();
     if(state.isAdmin){
       const backdrop = document.getElementById('settingsBackdrop');
@@ -294,11 +302,17 @@ function init(){
 function wireSettingsModal(){
   const backdrop = document.getElementById('settingsBackdrop');
   const openModal = () => { backdrop.classList.remove('hidden'); backdrop.classList.add('flex'); };
-  const closeModal = () => { backdrop.classList.add('hidden'); backdrop.classList.remove('flex'); };
+  const closeModal = () => {
+    if(!state.isAdmin) return; // signed out: the sign-in card is the whole page
+    backdrop.classList.add('hidden'); backdrop.classList.remove('flex');
+  };
   document.getElementById('settingsBtn').addEventListener('click', openModal);
   document.getElementById('settingsCancel').addEventListener('click', closeModal);
   backdrop.addEventListener('click', (e)=>{ if(e.target === backdrop) closeModal(); });
   document.getElementById('settingsSignOut').addEventListener('click', ()=>{ auth.signOut(); });
+  ['authEmailInput','authPasswordInput'].forEach(id=>document.getElementById(id).addEventListener('keydown', e=>{
+    if(e.key === 'Enter') document.getElementById('settingsSave').click();
+  }));
   document.getElementById('settingsSave').addEventListener('click', ()=>{
     if(state.isAdmin) return; // button reads "Signed in" then, no-op
     const email = document.getElementById('authEmailInput').value.trim();
