@@ -35,10 +35,10 @@ Columns (letter → header → width):
 | F | ESP Time | 7.29 | formula `=E<row> + TIME(<madridOffset>,0,0)` (2 in summer/CEST windows, 1 in winter/CET, from the window's `madridOffset`), not a stored value |
 | G | BOVM | 21.43 | `g.bovm` |
 | H | GFX operator | 26.86 | `g.gfxOperator` |
-| I | BKP CLOCK | 16.43 | `g.backupClock.status`, mapped (see below) |
-| J | GFX EXAMPLES | 14.43 | `g.gfxExample.status`, mapped (see below) |
+| I | BKP CLOCK | 16.43 (26 if any game has a BKP clock note) | `g.backupClock.status`, mapped (see below), then a line break and `g.backupClock.note` when there is one (notes on OK too), wrapped |
+| J | GFX EXAMPLES | 14.43 (26 if any game has a GFX examples note) | `g.gfxExample.status`, mapped, then a line break and `g.gfxExample.note`, same as I |
 | K | Technical power | 13.43 | `g.technicalPower` (raw, usually `""`) |
-| L | Additional Remarks | 49.0 | one item per line: `ESP time is +1 day.` (if `g.espNextDay`), `BKP clock: <g.backupClock.note>`, `GFX examples: <g.gfxExample.note>`, then `g.remarks` — empty items left out. Check notes are exported whatever the status (notes on OK too) |
+| L | Additional Remarks | 49.0 | one item per line: `ESP time is +1 day.` (if `g.espNextDay`), then `g.remarks` — empty items left out. The check notes are not repeated here: each is in its own column (I / J), which is what the user asked for |
 
 **Layout, top to bottom, repeated per broadcast date:**
 1. One row, merged A:H, the date label (`g.dateLabel`), font `DAZN Trim` 18pt
@@ -47,9 +47,11 @@ Columns (letter → header → width):
    `DAZN Oscine XBold` 14pt bold, centered, wrapped, row height 47.1, medium
    border on all four sides of the row.
 3. One row per game in that date, in `sortKey` order. First data row: 15.95
-   height. A row whose Additional Remarks wraps to more than one line
-   (about 52 characters per line, plus explicit line breaks) is set to
-   15 pt per line, since Excel does not grow rows for wrapped text itself. Every data cell: medium border on top of the first row and
+   height. A row whose BKP CLOCK, GFX EXAMPLES or Additional Remarks cell
+   wraps to more than one line is set to 15 pt per line of the tallest of
+   them (`xlLineCount`: word wrap at about one character per unit of column
+   width, 52 for L, plus explicit line breaks), since Excel does not grow
+   rows for wrapped text itself. Every data cell: medium border on top of the first row and
    bottom of the last row in the block, thin everywhere else, medium on the
    left of column A and right of column L (closes the outer box).
 4. Two blank rows before the next date's block.
@@ -79,8 +81,12 @@ back to RGB. Only matters if a 5th confederation is ever added.)
 
 **Conditional formatting** (green `FF00B050`, red `FFFF0000` with white
 `FFFFFFFF` font — colors pulled from the template's own `dxfs`):
-- `I1:J<lastRow>`: equals `"OK"` → green *(case-insensitive, matches "ok")*
-- `I1:J<lastRow>`: equals `"NO"` → red
+- `I1:J<lastRow>`: first line is `"OK"` → green *(case-insensitive, matches "ok")*
+- `I1:J<lastRow>`: first line is `"NO"` → red
+
+  These two are `expression` rules, `OR(I1="NO",LEFT(I1,3)="NO"&CHAR(10))`, not
+  `cellIs equal`: a check cell can hold a note under its status, and an
+  equals rule would then lose the colour. (`xlAddFirstLineCF` in admin.js.)
 - `K1:K<lastRow>`: equals `"yes"` → green
 - `K1:K<lastRow>`: equals `"no"` → red
 

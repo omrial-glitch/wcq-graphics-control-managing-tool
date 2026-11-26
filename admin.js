@@ -1294,6 +1294,28 @@ const XL_GAMES_COLUMNS = [
 
 function xlStatus(status){ return status==='ok' ? 'ok' : status==='issue' ? 'NO' : ''; }
 
+// BKP CLOCK / GFX EXAMPLES cell: the status, and under it the note written on that check (OK too).
+function xlNote(check){ return ((check && check.note) || '').trim(); }
+function xlCheckCell(check){ return [xlStatus(check && check.status), xlNote(check)].filter(Boolean).join('\n'); }
+// A check column holding notes is widened from the template width so they stay readable.
+const XL_CHECK_NOTE_WIDTH = 26;
+
+// How many lines a wrapped cell needs (Excel doesn't grow a row for wrapped text on its own).
+// perLine: about how many characters fit in one line of the column.
+function xlLineCount(text, perLine){
+  return String(text || '').split('\n').reduce((n, para)=>{
+    let lines = 1, len = 0;
+    for(const word of para.split(/\s+/).filter(Boolean)){
+      const need = len ? len + 1 + word.length : word.length;
+      if(need <= perLine){ len = need; continue; }
+      if(len) lines++;
+      lines += Math.floor((word.length - 1) / perLine); // a word longer than a line spills over
+      len = (word.length - 1) % perLine + 1;
+    }
+    return n + lines;
+  }, 0) || 1;
+}
+
 function xlBorder(top, bottom, colIdx, nCols, header){
   const thin = { style:'thin' }, med = { style:'medium' };
   return {
@@ -1310,9 +1332,22 @@ function xlAddCF(ws, ref, text, colorArgb, fontArgb, priority){
   ws.addConditionalFormatting({ ref, rules: [{ type:'cellIs', operator:'equal', formulae:[`"${text}"`], style, priority }] });
 }
 
+// Same colours, for a cell whose first line is `text` ("NO", or "NO" + a line break + a note).
+// Excel compares text case-insensitively, so 'OK' also matches "ok".
+function xlAddFirstLineCF(ws, ref, text, colorArgb, fontArgb, priority){
+  const style = { fill: { type:'pattern', pattern:'solid', bgColor:{argb:colorArgb} } };
+  if(fontArgb) style.font = { color:{argb:fontArgb} };
+  const tl = ref.split(':')[0]; // the rule's formula is written for the top-left cell of the range
+  const n = text.length + 1;
+  ws.addConditionalFormatting({ ref, rules: [{ type:'expression', formulae:[`OR(${tl}="${text}",LEFT(${tl},${n})="${text}"&CHAR(10))`], style, priority }] });
+}
+
 function buildGamesSheet(wb, sheetName, games){
   const ws = wb.addWorksheet(sheetName, { views: [{ state:'frozen', ySplit:2, showGridLines:false }] });
-  XL_GAMES_COLUMNS.forEach((c,i)=>{ ws.getColumn(i+1).width = c[1]; });
+  const widths = XL_GAMES_COLUMNS.map(c=> c[1]);
+  if(games.some(g=> xlNote(g.backupClock))) widths[8] = XL_CHECK_NOTE_WIDTH;
+  if(games.some(g=> xlNote(g.gfxExample))) widths[9] = XL_CHECK_NOTE_WIDTH;
+  widths.forEach((w,i)=>{ ws.getColumn(i+1).width = w; });
 
   // Group by calendar date first (dateISO), THEN sort within the group by
   // sortKey — never sort the whole list first and group by "did dateISO
@@ -1356,32 +1391,29 @@ function buildGamesSheet(wb, sheetName, games){
     groupGames.forEach((g, idx)=>{
       const isTop = idx===0, isBottom = idx===groupGames.length-1;
       const fillArgb = XL_CONT_FILL[g.continent] || XL_DEFAULT_FILL;
-      // Additional Remarks holds everything written about the game, one item per line: the +1 day
-      // reminder, the BKP CLOCK and GFX EXAMPLES notes (also on OK checks), then the general note.
-      const bkNote = ((g.backupClock && g.backupClock.note) || '').trim();
-      const gxNote = ((g.gfxExample && g.gfxExample.note) || '').trim();
+      // Each note goes in its own column: BKP CLOCK / GFX EXAMPLES carry the status with that check's
+      // note under it; Additional Remarks has the +1 day reminder, then the general note.
+      const bkCell = xlCheckCell(g.backupClock);
+      const gxCell = xlCheckCell(g.gfxExample);
       const remarks = [
         g.espNextDay ? 'ESP time is +1 day.' : '',
-        bkNote ? `BKP clock: ${bkNote}` : '',
-        gxNote ? `GFX examples: ${gxNote}` : '',
         (g.remarks || '').trim(),
       ].filter(Boolean).join('\n');
-      // Excel doesn't grow a row for wrapped text on its own: size it (about 52 characters per
-      // line at this column width, 15 pt per line).
-      const remarkLines = remarks ? remarks.split('\n').reduce((n, l)=> n + Math.max(1, Math.ceil(l.length / 52)), 0) : 1;
-      if(remarkLines > 1) ws.getRow(row).height = remarkLines * 15;
+      // Row height: enough lines for the tallest wrapped cell, 15 pt per line.
+      const lines = Math.max(xlLineCount(bkCell, Math.floor(widths[8])), xlLineCount(gxCell, Math.floor(widths[9])),
+                             xlLineCount(remarks, 52));
+      if(lines > 1) ws.getRow(row).height = lines * 15;
 
       const values = [
         g.home, g.away, g.venue, g.city, null, null, g.bovm, g.gfxOperator,
-        xlStatus(g.backupClock && g.backupClock.status),
-        xlStatus(g.gfxExample && g.gfxExample.status),
+        bkCell, gxCell,
         g.technicalPower || '', remarks,
       ];
       values.forEach((v,i)=>{
         const cell = ws.getCell(row, i+1);
         if(i!==4 && i!==5) cell.value = v;
         cell.font = i<6 ? XL_FONT_WIDE : XL_FONT_NARROW;
-        cell.alignment = { horizontal:'center', vertical:'middle', wrapText: i===11 };
+        cell.alignment = { horizontal:'center', vertical:'middle', wrapText: i===8 || i===9 || i===11 };
         cell.border = xlBorder(isTop, isBottom, i+1, XL_GAMES_COLUMNS.length, false);
         cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb: fillArgb} };
       });
@@ -1401,12 +1433,13 @@ function buildGamesSheet(wb, sheetName, games){
 
       row++;
     });
-    if(!ws.getRow(firstDataRow).height) ws.getRow(firstDataRow).height = 15.95; // unless sized for long remarks
+    if(!ws.getRow(firstDataRow).height) ws.getRow(firstDataRow).height = 15.95; // unless sized for wrapped notes
   });
 
   const lastRow = Math.max(row - 1, 1);
-  xlAddCF(ws, `I1:J${lastRow}`, 'OK', XL_GREEN, null, 1);
-  xlAddCF(ws, `I1:J${lastRow}`, 'NO', XL_RED, XL_WHITE, 2);
+  // A check cell can hold a note under its status, so match its first line rather than the whole cell.
+  xlAddFirstLineCF(ws, `I1:J${lastRow}`, 'OK', XL_GREEN, null, 1);
+  xlAddFirstLineCF(ws, `I1:J${lastRow}`, 'NO', XL_RED, XL_WHITE, 2);
   xlAddCF(ws, `K1:K${lastRow}`, 'yes', XL_GREEN, null, 3);
   xlAddCF(ws, `K1:K${lastRow}`, 'no', XL_RED, XL_WHITE, 4);
   return ws;

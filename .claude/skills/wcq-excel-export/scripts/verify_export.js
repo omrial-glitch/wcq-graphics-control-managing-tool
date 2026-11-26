@@ -12,8 +12,10 @@
  *      order (catches a sort-then-group bug that silently splits a date).
  *   2. Every game's GMT cell round-trips to the exact HH:MM from the data
  *      (catches the local-timezone Date-construction bug).
- *   3. Notes on the BKP CLOCK / GFX EXAMPLES checks reach Additional Remarks
- *      (column L), and a multi-line remark gets a taller row.
+ *   3. A note on the BKP CLOCK / GFX EXAMPLES check lands in that check's own
+ *      cell (I / J), under the status, and not in Additional Remarks; the
+ *      general note stays in Additional Remarks (L); wrapped rows get taller;
+ *      the colour rules still match "NO" / "ok" when a note follows.
  *
  * It also sanity-checks sheet names and that conditional formatting rules
  * are actually present (easy to lose silently if a rule's `ref` typo'd).
@@ -101,6 +103,7 @@ async function main() {
   games[0].backupClock = { status: 'issue', note: 'Were unable to prepare it for the first game' };
   games[1].gfxExample = { status: 'ok', note: 'Approved after a small fix' };
   games[1].remarks = 'General note';
+  games[2].backupClock = { status: 'ok', note: '' };
 
   const label = windowId.toUpperCase();
   const wb = new ExcelJS.Workbook();
@@ -178,16 +181,32 @@ async function main() {
       }
     });
 
-    // --- check 3: check notes reach Additional Remarks (column L) ---
-    [[games[0], ['BKP clock: Were unable to prepare it for the first game'], 'NO', 9],
-     [games[1], ['GFX examples: Approved after a small fix', 'General note'], 'ok', 10]].forEach(([g, want, status, col]) => {
+    // --- check 3: each check's note is in its own cell, the general note in Additional Remarks ---
+    const cellOf = (g, col) => {
       const r = rowByKey.get(`${g.home}|${g.away}|${g.venue}|${g.city}`);
-      if (!r) return;
-      const remark = String(gs.getRow(r).getCell(12).value || '');
-      want.forEach(w => { if (!remark.includes(w)) failures.push(`Additional Remarks for ${g.home} vs ${g.away} is missing "${w}" (got "${remark}")`); });
-      const st = gs.getRow(r).getCell(col).value;
-      if (st !== status) failures.push(`Status cell for ${g.home} vs ${g.away} should be "${status}", got "${st}"`);
-      if (!(gs.getRow(r).height > 15.95)) failures.push(`Row for ${g.home} vs ${g.away} has a multi-line remark but height ${gs.getRow(r).height}`);
+      return r ? { r, v: gs.getRow(r).getCell(col).value } : null;
+    };
+    [[games[0], 9, 'NO\nWere unable to prepare it for the first game'],
+     [games[1], 10, 'ok\nApproved after a small fix'],
+     [games[2], 9, 'ok']].forEach(([g, col, want]) => {
+      const c = cellOf(g, col);
+      if (c && c.v !== want) failures.push(`${col === 9 ? 'BKP CLOCK' : 'GFX EXAMPLES'} cell for ${g.home} vs ${g.away} should be ${JSON.stringify(want)}, got ${JSON.stringify(c.v)}`);
+      if (c && want.includes('\n') && !(gs.getRow(c.r).height > 15.95)) failures.push(`Row for ${g.home} vs ${g.away} has a wrapped note but height ${gs.getRow(c.r).height}`);
+      if (c && want.includes('\n') && !gs.getRow(c.r).getCell(col).alignment.wrapText) failures.push(`Note cell for ${g.home} vs ${g.away} does not wrap`);
+    });
+    [[games[0], ''], [games[1], 'General note']].forEach(([g, want]) => {
+      const c = cellOf(g, 12);
+      const got = String((c && c.v) || '').replace(/^ESP time is \+1 day\.\n?/, '');
+      if (c && got !== want) failures.push(`Additional Remarks for ${g.home} vs ${g.away} should be ${JSON.stringify(want)} (check notes go in their own cells), got ${JSON.stringify(c.v)}`);
+    });
+    [9, 10].forEach(col => {
+      if (!(gs.getColumn(col).width > 20)) failures.push(`Column ${col} holds notes but was not widened (width ${gs.getColumn(col).width})`);
+    });
+    // The I:J colour rules must match the first line, so a note under the status keeps the colour.
+    const ijRules = gs.conditionalFormattings.filter(cf => /^I1:J\d+$/.test(cf.ref)).flatMap(cf => cf.rules);
+    ['OK', 'NO'].forEach(t => {
+      const rule = ijRules.find(rl => rl.type === 'expression' && (rl.formulae || []).some(f => f.includes(`"${t}"&CHAR(10)`)));
+      if (!rule) failures.push(`No first-line colour rule for "${t}" on I:J (got ${JSON.stringify(ijRules)})`);
     });
 
     // --- check 4: conditional formatting rules survived ---
@@ -205,7 +224,7 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`✓ Export verified clean — ${games.length} games, window "${windowId}", 4 sheets, dates contiguous, GMT times exact, check notes in Additional Remarks, conditional formatting present.`);
+  console.log(`✓ Export verified clean — ${games.length} games, window "${windowId}", 4 sheets, dates contiguous, GMT times exact, check notes in their own cells, conditional formatting present.`);
 }
 
 main().catch(e => {
