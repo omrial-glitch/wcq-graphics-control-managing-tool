@@ -32,13 +32,13 @@ Columns (letter → header → width):
 | C | Venue | 39.71 | `g.venue` |
 | D | City | 18.29 | `g.city` |
 | E | GMT | 7.43 | `g.gmtTime` ("HH:MM") — real Excel time value |
-| F | ESP Time | 7.29 | formula `=E<row> + TIME(2,0,0)`, not a stored value |
+| F | ESP Time | 7.29 | formula `=E<row> + TIME(<madridOffset>,0,0)` (2 in summer/CEST windows, 1 in winter/CET, from the window's `madridOffset`), not a stored value |
 | G | BOVM | 21.43 | `g.bovm` |
 | H | GFX operator | 26.86 | `g.gfxOperator` |
 | I | BKP CLOCK | 16.43 | `g.backupClock.status`, mapped (see below) |
 | J | GFX EXAMPLES | 14.43 | `g.gfxExample.status`, mapped (see below) |
 | K | Technical power | 13.43 | `g.technicalPower` (raw, usually `""`) |
-| L | Additional Remarks | 49.0 | `g.remarks`, prefixed if `g.espNextDay` |
+| L | Additional Remarks | 49.0 | one item per line: `ESP time is +1 day.` (if `g.espNextDay`), `BKP clock: <g.backupClock.note>`, `GFX examples: <g.gfxExample.note>`, then `g.remarks` — empty items left out. Check notes are exported whatever the status (notes on OK too) |
 
 **Layout, top to bottom, repeated per broadcast date:**
 1. One row, merged A:H, the date label (`g.dateLabel`), font `DAZN Trim` 18pt
@@ -47,7 +47,9 @@ Columns (letter → header → width):
    `DAZN Oscine XBold` 14pt bold, centered, wrapped, row height 47.1, medium
    border on all four sides of the row.
 3. One row per game in that date, in `sortKey` order. First data row: 15.95
-   height. Every data cell: medium border on top of the first row and
+   height. A row whose Additional Remarks wraps to more than one line
+   (about 52 characters per line, plus explicit line breaks) is set to
+   15 pt per line, since Excel does not grow rows for wrapped text itself. Every data cell: medium border on top of the first row and
    bottom of the last row in the block, thin everywhere else, medium on the
    left of column A and right of column L (closes the outer box).
 4. Two blank rows before the next date's block.

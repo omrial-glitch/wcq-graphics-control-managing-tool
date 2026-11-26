@@ -10,7 +10,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
-<script src="firebase-config.js?v=202611251849"></script>
+<script src="firebase-config.js?v=202611261402"></script>
 <script>
   tailwind.config = {
     darkMode: 'class',
@@ -37,6 +37,12 @@
   ::-webkit-scrollbar-thumb{background:#273549;border-radius:3px}
   ::-webkit-scrollbar-thumb:hover{background:#3b4d66}
   textarea{field-sizing:content}
+  /* Notes in the schedule wrap inside their column instead of widening it while typing
+     (width:0 = the text never stretches the column; min-width:100% = fill the cell),
+     and stop growing after a few lines: the rest scrolls inside the box. */
+  textarea.status-note, textarea.remarks-note{ width:0; min-width:100%; overflow-wrap:anywhere; overflow-y:auto; }
+  textarea.status-note{ max-height:calc(4lh + 18px); } /* 4 lines + padding + border */
+  textarea.remarks-note{ max-height:calc(5lh + 14px); }
 
   @font-face{
     font-family:'Stepitup Condensed';
@@ -295,8 +301,8 @@
 <div id="toastStack" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 items-end"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
-<script src="seed-data.js?v=202611251849"></script>
-<script src="operators.js?v=202611251849"></script>
-<script src="admin.js?v=202611251849"></script>
+<script src="seed-data.js?v=202611261402"></script>
+<script src="operators.js?v=202611261402"></script>
+<script src="admin.js?v=202611261402"></script>
 </body>
 </html>

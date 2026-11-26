@@ -1356,8 +1356,20 @@ function buildGamesSheet(wb, sheetName, games){
     groupGames.forEach((g, idx)=>{
       const isTop = idx===0, isBottom = idx===groupGames.length-1;
       const fillArgb = XL_CONT_FILL[g.continent] || XL_DEFAULT_FILL;
-      let remarks = g.remarks || '';
-      if(g.espNextDay) remarks = ('ESP time is +1 day. ' + remarks).trim();
+      // Additional Remarks holds everything written about the game, one item per line: the +1 day
+      // reminder, the BKP CLOCK and GFX EXAMPLES notes (also on OK checks), then the general note.
+      const bkNote = ((g.backupClock && g.backupClock.note) || '').trim();
+      const gxNote = ((g.gfxExample && g.gfxExample.note) || '').trim();
+      const remarks = [
+        g.espNextDay ? 'ESP time is +1 day.' : '',
+        bkNote ? `BKP clock: ${bkNote}` : '',
+        gxNote ? `GFX examples: ${gxNote}` : '',
+        (g.remarks || '').trim(),
+      ].filter(Boolean).join('\n');
+      // Excel doesn't grow a row for wrapped text on its own: size it (about 52 characters per
+      // line at this column width, 15 pt per line).
+      const remarkLines = remarks ? remarks.split('\n').reduce((n, l)=> n + Math.max(1, Math.ceil(l.length / 52)), 0) : 1;
+      if(remarkLines > 1) ws.getRow(row).height = remarkLines * 15;
 
       const values = [
         g.home, g.away, g.venue, g.city, null, null, g.bovm, g.gfxOperator,
@@ -1389,7 +1401,7 @@ function buildGamesSheet(wb, sheetName, games){
 
       row++;
     });
-    ws.getRow(firstDataRow).height = 15.95;
+    if(!ws.getRow(firstDataRow).height) ws.getRow(firstDataRow).height = 15.95; // unless sized for long remarks
   });
 
   const lastRow = Math.max(row - 1, 1);

@@ -12,6 +12,8 @@
  *      order (catches a sort-then-group bug that silently splits a date).
  *   2. Every game's GMT cell round-trips to the exact HH:MM from the data
  *      (catches the local-timezone Date-construction bug).
+ *   3. Notes on the BKP CLOCK / GFX EXAMPLES checks reach Additional Remarks
+ *      (column L), and a multi-line remark gets a taller row.
  *
  * It also sanity-checks sheet names and that conditional formatting rules
  * are actually present (easy to lose silently if a rule's `ref` typo'd).
@@ -78,15 +80,27 @@ async function main() {
   }
 
   const builderSrc = extractBuilderSource(path.resolve(adminJsPath));
+  // The ESP Time formula uses madridOffset() from elsewhere in admin.js (the window's CET/CEST
+  // offset from the WINDOWS list), so provide it here from that same list.
+  const winMatch = fs.readFileSync(path.resolve(adminJsPath), 'utf8').match(/const WINDOWS = (\[[\s\S]*?\]);/);
+  // eslint-disable-next-line no-eval
+  const WINDOWS_LIST = winMatch ? eval(winMatch[1]) : [];
+  // eslint-disable-next-line no-unused-vars
+  const madridOffset = () => ((WINDOWS_LIST.find(w => w.id === windowId) || {}).madridOffset) || 2;
   // eslint-disable-next-line no-eval
   eval(builderSrc); // defines buildGamesSheet, buildRosterSheet, buildTechnicalPowerSheet in this scope
 
   const seed = loadSeedData(path.resolve(seedPath));
-  const games = seed[windowId] && seed[windowId].games;
-  if (!games || !games.length) {
+  const seedGames = seed[windowId] && seed[windowId].games;
+  if (!seedGames || !seedGames.length) {
     console.error(`No games found for window "${windowId}" in ${seedPath}. Known windows: ${Object.keys(seed).join(', ')}`);
     process.exit(2);
   }
+  // Seed games carry no notes yet: give two of them notes on their checks (one flagged, one OK).
+  const games = JSON.parse(JSON.stringify(seedGames));
+  games[0].backupClock = { status: 'issue', note: 'Were unable to prepare it for the first game' };
+  games[1].gfxExample = { status: 'ok', note: 'Approved after a small fix' };
+  games[1].remarks = 'General note';
 
   const label = windowId.toUpperCase();
   const wb = new ExcelJS.Workbook();
@@ -164,7 +178,19 @@ async function main() {
       }
     });
 
-    // --- check 3: conditional formatting rules survived ---
+    // --- check 3: check notes reach Additional Remarks (column L) ---
+    [[games[0], ['BKP clock: Were unable to prepare it for the first game'], 'NO', 9],
+     [games[1], ['GFX examples: Approved after a small fix', 'General note'], 'ok', 10]].forEach(([g, want, status, col]) => {
+      const r = rowByKey.get(`${g.home}|${g.away}|${g.venue}|${g.city}`);
+      if (!r) return;
+      const remark = String(gs.getRow(r).getCell(12).value || '');
+      want.forEach(w => { if (!remark.includes(w)) failures.push(`Additional Remarks for ${g.home} vs ${g.away} is missing "${w}" (got "${remark}")`); });
+      const st = gs.getRow(r).getCell(col).value;
+      if (st !== status) failures.push(`Status cell for ${g.home} vs ${g.away} should be "${status}", got "${st}"`);
+      if (!(gs.getRow(r).height > 15.95)) failures.push(`Row for ${g.home} vs ${g.away} has a multi-line remark but height ${gs.getRow(r).height}`);
+    });
+
+    // --- check 4: conditional formatting rules survived ---
     const cfCount = gs.conditionalFormattings.length;
     if (cfCount < 4) {
       failures.push(`Expected at least 4 conditional formatting rules on ${gamesSheetName} (OK/NO on I:J, yes/no on K), found ${cfCount}`);
@@ -179,7 +205,7 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`✓ Export verified clean — ${games.length} games, window "${windowId}", 4 sheets, dates contiguous, GMT times exact, conditional formatting present.`);
+  console.log(`✓ Export verified clean — ${games.length} games, window "${windowId}", 4 sheets, dates contiguous, GMT times exact, check notes in Additional Remarks, conditional formatting present.`);
 }
 
 main().catch(e => {
