@@ -311,6 +311,44 @@ function switchTab(name){
   state.tab = name;
 }
 
+/* ---------------- Game schedule: column header that stays in view ----------------
+   The schedule table scrolls sideways inside its own box, so its <thead> can't stick to the page.
+   #gamesHead holds a copy of the header row: sticky under the top bar (CSS in index.html), with
+   each column as wide as the table's (the table's own header row stays, collapsed, so the columns
+   still size to their titles), and scrolled sideways together with the table. */
+function stickyGamesHeader(){
+  const table = document.getElementById('gamesTable');
+  const scroller = document.getElementById('gamesScroll');
+  const head = document.getElementById('gamesHead');
+  const topBar = document.querySelector('header');
+  const sizers = Array.from(table.tHead.rows[0].cells);
+
+  const copy = document.createElement('table');
+  copy.className = table.className.replace(/\bw-full\b/, '');
+  copy.removeAttribute('id');
+  const cols = document.createElement('colgroup');
+  sizers.forEach(()=> cols.appendChild(document.createElement('col')));
+  copy.append(cols, table.tHead.cloneNode(true));
+  head.appendChild(copy);
+
+  const followSideways = ()=>{ head.scrollLeft = scroller.scrollLeft; };
+  const sync = ()=>{
+    document.documentElement.style.setProperty('--top-bar-h', topBar.offsetHeight + 'px');
+    // Each column ends where the table's column ends (measured from the right edges: the rows'
+    // border starts the table's cells slightly in from its edge).
+    const box = table.getBoundingClientRect();
+    copy.style.width = box.width + 'px';
+    let left = box.left;
+    sizers.forEach((th, i)=>{ const right = th.getBoundingClientRect().right; cols.children[i].style.width = (right - left) + 'px'; left = right; });
+    followSideways();
+  };
+  // Column widths change with the rows shown (filter, new data), the window size and the fonts.
+  const ro = new ResizeObserver(sync);
+  [topBar, table, ...sizers].forEach(el=> ro.observe(el));
+  scroller.addEventListener('scroll', followSideways, { passive:true });
+  sync();
+}
+
 function init(){
   initFirebase();
 
@@ -392,6 +430,7 @@ function init(){
   });
 
   wireSettingsModal();
+  stickyGamesHeader();
   wireRenderCatchUp();
   keepLive();
   startClock();

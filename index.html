@@ -10,7 +10,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
-<script src="firebase-config.js?v=202611261640"></script>
+<script src="firebase-config.js?v=202611271721"></script>
 <script>
   tailwind.config = {
     darkMode: 'class',
@@ -43,6 +43,19 @@
   textarea.status-note, textarea.remarks-note{ width:0; min-width:100%; overflow-wrap:anywhere; overflow-y:auto; }
   textarea.status-note{ max-height:calc(4lh + 18px); } /* 4 lines + padding + border */
   textarea.remarks-note{ max-height:calc(5lh + 14px); }
+
+  /* Game schedule: the column header row stays in view under the top bar while scrolling down.
+     The table scrolls sideways inside its own box, which would hold a sticky <thead> in place,
+     so a copy of the header row (#gamesHead, filled in by admin.js) sits above that box, sticks
+     to the page, and follows the box sideways. The table's own header row stays in the table,
+     collapsed to no height, only so the columns keep sizing to their titles. overflow:clip
+     (not hidden) keeps the rounded corners without stopping the sticky. */
+  #gamesTableWrap{ overflow:hidden; overflow:clip; }
+  #panel-games{ overflow-x:clip; }
+  #gamesHead{ position:sticky; top:var(--top-bar-h, 0px); z-index:20; overflow:hidden; }
+  #gamesHead table{ table-layout:fixed; }
+  #gamesTable > thead{ border-bottom-width:0; }
+  #gamesTable > thead th{ padding-top:0; padding-bottom:0; height:0; line-height:0; visibility:hidden; }
 
   @font-face{
     font-family:'Stepitup Condensed';
@@ -140,7 +153,7 @@
 </section>
 
 <!-- GAMES PANEL -->
-<main class="panel flex-1 overflow-x-auto p-4 max-w-[1920px] w-full mx-auto" id="panel-games">
+<main class="panel flex-1 p-4 max-w-[1920px] w-full mx-auto" id="panel-games">
   <div id="crewBanner" class="hidden mb-3 flex items-center justify-between gap-3 flex-wrap rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
     <span>Crew names (BOVM / GFX) and operator contacts are not loaded for this window yet. They come from the window's Production Plan and stay admin-only.</span>
     <label class="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-xs font-bold text-white cursor-pointer">
@@ -154,9 +167,10 @@
     <div class="text-xs text-slate-400 max-w-md" id="emptyWindowSubtitle">Send the Excel files for this window to Claude and they'll be imported here — the schedule, crew and colours all come from a real import, never typed in by hand.</div>
     <button id="importSeedBtn" type="button" class="hidden px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded text-xs font-bold text-white">Import window data</button>
   </div>
-  <div id="gamesTableWrap" class="border border-[#1f2937] rounded-lg overflow-hidden bg-[#111827] shadow-2xl">
-    <div class="overflow-x-auto">
-      <table class="w-full text-left border-collapse">
+  <div id="gamesTableWrap" class="border border-[#1f2937] rounded-lg bg-[#111827] shadow-2xl">
+    <div id="gamesHead" aria-hidden="true"></div>
+    <div class="overflow-x-auto" id="gamesScroll">
+      <table class="w-full text-left border-collapse" id="gamesTable">
         <thead class="bg-[#0f172a] text-[11px] uppercase tracking-wider font-semibold text-slate-400 border-b border-[#1f2937]">
           <tr>
             <th class="py-2.5 px-3 w-16 text-center">Zone</th>
@@ -301,8 +315,8 @@
 <div id="toastStack" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 items-end"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
-<script src="seed-data.js?v=202611261640"></script>
-<script src="operators.js?v=202611261640"></script>
-<script src="admin.js?v=202611261640"></script>
+<script src="seed-data.js?v=202611271721"></script>
+<script src="operators.js?v=202611271721"></script>
+<script src="admin.js?v=202611271721"></script>
 </body>
 </html>
